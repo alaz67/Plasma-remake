@@ -1,3 +1,5 @@
+-- SECRET DUEL
+
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
@@ -424,9 +426,7 @@ local MobileSupportBtn = createToggle(MobileFrame, "MobileSupport", "Show Mobile
 local _mi = Instance.new("TextLabel")
 _mi.Size = UDim2.new(1,-10,0,60); _mi.Position = UDim2.new(0,5,0,82)
 _mi.BackgroundTransparency = 1
-_mi.Text = "4 buttons appear on the right:
-AUTO STEAL  |  BAT AIMBOT
-AUTO LEFT  |  AUTO RIGHT"
+_mi.Text = "4 buttons: AUTO STEAL | BAT AIMBOT | AUTO LEFT | AUTO RIGHT"
 _mi.Font = Enum.Font.Gotham; _mi.TextSize = 11
 _mi.TextColor3 = TEXT_DIM; _mi.TextWrapped = true
 _mi.TextXAlignment = Enum.TextXAlignment.Left; _mi.Parent = MobileFrame
