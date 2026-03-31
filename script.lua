@@ -1018,14 +1018,10 @@ local function createMobileButton(text, position)
     return btn
 end
 
-local MobileStealBtn = createMobileButton("AUTO
-STEAL",  UDim2.new(1,-80,0.5,-218))
-local MobileBatBtn   = createMobileButton("BAT
-AIMBOT",  UDim2.new(1,-80,0.5,-145))
-local MobileLeftBtn  = createMobileButton("AUTO
-LEFT",   UDim2.new(1,-80,0.5,-72))
-local MobileRightBtn = createMobileButton("AUTO
-RIGHT",  UDim2.new(1,-80,0.5,1))
+local MobileStealBtn = createMobileButton("AUTO STEAL",  UDim2.new(1,-80,0.5,-218))
+local MobileBatBtn   = createMobileButton("BAT AIMBOT",  UDim2.new(1,-80,0.5,-145))
+local MobileLeftBtn  = createMobileButton("AUTO LEFT",   UDim2.new(1,-80,0.5,-72))
+local MobileRightBtn = createMobileButton("AUTO RIGHT",  UDim2.new(1,-80,0.5,1))
 
 MobileSupportBtn.MouseButton1Click:Connect(function()
     local newState = MobileSupportBtn.BackgroundColor3 ~= ACCENT
