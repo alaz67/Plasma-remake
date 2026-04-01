@@ -1000,6 +1000,44 @@ player.CharacterAdded:Connect(function()
     if NoAnimBtn.BackgroundColor3 == ACCENT then toggleNoAnimations(true) end
 end)
 
+
+local floatConn = nil
+local floatY = nil
+local spinBAV2 = nil
+
+local function startMobileFloat()
+    local hrp = getHRP(); if not hrp then return end
+    floatY = hrp.Position.Y
+    if floatConn then floatConn:Disconnect(); floatConn = nil end
+    floatConn = RunService.Heartbeat:Connect(function()
+        local h = getHRP(); if not h then return end
+        local vel = h.AssemblyLinearVelocity
+        -- Kill vertical velocity to float
+        h.AssemblyLinearVelocity = Vector3.new(vel.X, 0, vel.Z)
+        -- Lock Y position
+        if floatY then
+            local diff = h.Position.Y - floatY
+            if math.abs(diff) > 0.3 then
+                h.CFrame = CFrame.new(h.Position.X, floatY, h.Position.Z)
+            end
+        end
+    end)
+end
+local function stopMobileFloat()
+    if floatConn then floatConn:Disconnect(); floatConn = nil end
+    floatY = nil
+end
+local function startMobileSpin()
+    local hrp = getHRP(); if not hrp then return end
+    if spinBAV2 then spinBAV2:Destroy() end
+    spinBAV2 = Instance.new("BodyAngularVelocity")
+    spinBAV2.MaxTorque = Vector3.new(0, math.huge, 0)
+    spinBAV2.AngularVelocity = Vector3.new(0, 50, 0)
+    spinBAV2.Parent = hrp
+end
+local function stopMobileSpin()
+    if spinBAV2 then spinBAV2:Destroy(); spinBAV2 = nil end
+end
 -- Mobile Buttons GUI
 local MobileButtonsGui = Instance.new("ScreenGui")
 MobileButtonsGui.Name = "SecretMobileButtons"; MobileButtonsGui.ResetOnSpawn = false
@@ -1018,16 +1056,199 @@ local function createMobileButton(text, position)
     return btn
 end
 
-local MobileStealBtn = createMobileButton("AUTO STEAL",  UDim2.new(1,-80,0.5,-218))
-local MobileBatBtn   = createMobileButton("BAT AIMBOT",  UDim2.new(1,-80,0.5,-145))
-local MobileLeftBtn  = createMobileButton("AUTO LEFT",   UDim2.new(1,-80,0.5,-72))
-local MobileRightBtn = createMobileButton("AUTO RIGHT",  UDim2.new(1,-80,0.5,1))
+-- Right side buttons (like screenshot)
+local MobileFloatBtn  = Instance.new("TextButton") -- removed
+local MobileUngrabBtn = createMobileButton("UNGRAB",     UDim2.new(1,-80,0.10,0))
+local MobileBatBtn    = createMobileButton("BAT AIMBOT", UDim2.new(1,-80,0.24,0))
+local MobileTauntBtn  = createMobileButton("TAUNT",      UDim2.new(1,-80,0.38,0))
+local MobileSpinBtn   = createMobileButton("SPINBOT",    UDim2.new(1,-80,0.52,0))
+local MobileStealBtn  = Instance.new("TextButton") -- hidden
+local MobileLeftBtn   = Instance.new("TextButton")  -- hidden
+local MobileRightBtn  = Instance.new("TextButton")  -- hidden
 
+
+-- Left mobile buttons
+-- AUTO PLAY REMOVED
+local MobileLeftMobBtn  = createMobileButton("SECRET LEFT",  UDim2.new(0,10,0.3,-27))
+local MobileRightMobBtn = createMobileButton("SECRET RIGHT", UDim2.new(0,10,0.3,46))
+
+
+-- AUTO PLAY SYSTEM
+
+
+
+
+
+-- TAUNT handled by mobile button
 MobileSupportBtn.MouseButton1Click:Connect(function()
     local newState = MobileSupportBtn.BackgroundColor3 ~= ACCENT
     updateToggle(MobileSupportBtn, newState)
     MobileButtonsGui.Enabled = newState
 end)
+
+
+-- auto play handler above
+
+MobileLeftMobBtn.MouseButton1Click:Connect(function()
+    local isOn = MobileLeftMobBtn.BackgroundColor3 == ACCENT
+    if isOn then
+        leftActive = false
+        MobileLeftMobBtn.BackgroundColor3 = BG_CARD
+        MobileLeftMobBtn.TextColor3 = Color3.fromRGB(255,255,255)
+        return
+    end
+    updateToggle(AutoRightBtn, false)
+    MobileRightMobBtn.BackgroundColor3 = BG_CARD
+    MobileRightMobBtn.TextColor3 = Color3.fromRGB(255,255,255)
+    MobileLeftMobBtn.BackgroundColor3 = ACCENT
+    MobileLeftMobBtn.TextColor3 = BG_DARK
+    leftActive = true
+    task.spawn(function()
+        -- Go LEFT
+        moveToTargets(leftTargets)
+        if not leftActive then return end
+        -- Wait for steal (1.8 seconds)
+        task.wait(1.8)
+        if not leftActive then return end
+        -- Come back RIGHT slowly (walk speed)
+        local hrp = getHRP()
+        if hrp then
+            for _, tgt in ipairs(rightTargets) do
+                if not leftActive then break end
+                local arrived = false
+                local wc
+                wc = RunService.Heartbeat:Connect(function()
+                    local h = getHRP(); if not h then arrived=true; return end
+                    local hum2 = getHum(); if not hum2 then arrived=true; return end
+                    local dist = (Vector3.new(tgt.X,h.Position.Y,tgt.Z)-h.Position).Magnitude
+                    if dist < 1.5 then
+                        arrived=true; h.AssemblyLinearVelocity=Vector3.zero
+                        hum2:Move(Vector3.zero,false); pcall(function() wc:Disconnect() end); return
+                    end
+                    local d = tgt - h.Position
+                    local m = Vector3.new(d.X,0,d.Z).Unit
+                    hum2:Move(m,false)
+                    h.AssemblyLinearVelocity = Vector3.new(m.X*16, h.AssemblyLinearVelocity.Y, m.Z*16)
+                end)
+                local t0 = tick()
+                while not arrived and tick()-t0 < 15 and leftActive do task.wait(0.05) end
+                pcall(function() wc:Disconnect() end)
+            end
+        end
+        leftActive = false
+        MobileLeftMobBtn.BackgroundColor3 = BG_CARD
+        MobileLeftMobBtn.TextColor3 = Color3.fromRGB(255,255,255)
+    end)
+end)
+
+MobileRightMobBtn.MouseButton1Click:Connect(function()
+    local isOn = MobileRightMobBtn.BackgroundColor3 == ACCENT
+    if isOn then
+        rightActive = false
+        MobileRightMobBtn.BackgroundColor3 = BG_CARD
+        MobileRightMobBtn.TextColor3 = Color3.fromRGB(255,255,255)
+        return
+    end
+    updateToggle(AutoLeftBtn, false)
+    MobileLeftMobBtn.BackgroundColor3 = BG_CARD
+    MobileLeftMobBtn.TextColor3 = Color3.fromRGB(255,255,255)
+    MobileRightMobBtn.BackgroundColor3 = ACCENT
+    MobileRightMobBtn.TextColor3 = BG_DARK
+    rightActive = true
+    task.spawn(function()
+        -- Go RIGHT
+        moveToTargets(rightTargets)
+        if not rightActive then return end
+        -- Wait for steal (1.8 seconds)
+        task.wait(1.8)
+        if not rightActive then return end
+        -- Come back LEFT slowly (walk speed)
+        local hrp = getHRP()
+        if hrp then
+            for _, tgt in ipairs(leftTargets) do
+                if not rightActive then break end
+                local arrived = false
+                local wc
+                wc = RunService.Heartbeat:Connect(function()
+                    local h = getHRP(); if not h then arrived=true; return end
+                    local hum2 = getHum(); if not hum2 then arrived=true; return end
+                    local dist = (Vector3.new(tgt.X,h.Position.Y,tgt.Z)-h.Position).Magnitude
+                    if dist < 1.5 then
+                        arrived=true; h.AssemblyLinearVelocity=Vector3.zero
+                        hum2:Move(Vector3.zero,false); pcall(function() wc:Disconnect() end); return
+                    end
+                    local d = tgt - h.Position
+                    local m = Vector3.new(d.X,0,d.Z).Unit
+                    hum2:Move(m,false)
+                    h.AssemblyLinearVelocity = Vector3.new(m.X*16, h.AssemblyLinearVelocity.Y, m.Z*16)
+                end)
+                local t0 = tick()
+                while not arrived and tick()-t0 < 15 and rightActive do task.wait(0.05) end
+                pcall(function() wc:Disconnect() end)
+            end
+        end
+        rightActive = false
+        MobileRightMobBtn.BackgroundColor3 = BG_CARD
+        MobileRightMobBtn.TextColor3 = Color3.fromRGB(255,255,255)
+    end)
+end)
+
+-- Right button handlers
+-- float removed
+
+MobileUngrabBtn.MouseButton1Click:Connect(function()
+    pcall(function()
+        local char = player.Character; if not char then return end
+        local hum = char:FindFirstChildOfClass("Humanoid"); if not hum then return end
+        hum:UnequipTools()
+    end)
+    tw(MobileUngrabBtn, {BackgroundColor3 = ACCENT})
+    MobileUngrabBtn.TextColor3 = BG_DARK
+    task.delay(0.35, function()
+        tw(MobileUngrabBtn, {BackgroundColor3 = BG_CARD})
+        MobileUngrabBtn.TextColor3 = Color3.fromRGB(255,255,255)
+    end)
+end)
+
+local spinMobileOn = false
+MobileSpinBtn.MouseButton1Click:Connect(function()
+    spinMobileOn = not spinMobileOn
+    MobileSpinBtn.BackgroundColor3 = spinMobileOn and ACCENT or BG_CARD
+    MobileSpinBtn.TextColor3 = spinMobileOn and BG_DARK or Color3.fromRGB(255,255,255)
+    if spinMobileOn then startMobileSpin() else stopMobileSpin() end
+end)
+
+local tauntMobileOn = false
+local function sendChat(msg)
+    pcall(function()
+        local rs = game:GetService("ReplicatedStorage")
+        -- Method 1: DefaultChatSystemChatEvents
+        local chatEvents = rs:FindFirstChild("DefaultChatSystemChatEvents", true)
+        if chatEvents then
+            local sayMsg = chatEvents:FindFirstChild("SayMessageRequest")
+            if sayMsg then sayMsg:FireServer(msg, "All"); return end
+        end
+    end)
+    pcall(function()
+        -- Method 2: TextChatService
+        local tcs = game:GetService("TextChatService")
+        local channel = tcs:FindFirstChild("TextChannels") and tcs.TextChannels:FindFirstChild("RBXGeneral")
+        if channel then channel:SendAsync(msg) end
+    end)
+end
+
+MobileTauntBtn.MouseButton1Click:Connect(function()
+    sendChat("/SECRET HUB BETTER")
+    task.wait(0.5)
+    sendChat("/SECRET HUB BETTER")
+    tw(MobileTauntBtn, {BackgroundColor3 = ACCENT})
+    MobileTauntBtn.TextColor3 = BG_DARK
+    task.delay(0.6, function()
+        tw(MobileTauntBtn, {BackgroundColor3 = BG_CARD})
+        MobileTauntBtn.TextColor3 = Color3.fromRGB(255,255,255)
+    end)
+end)
+
 
 MobileStealBtn.MouseButton1Click:Connect(function()
     local newState = AutoStealBtn.BackgroundColor3 ~= ACCENT
