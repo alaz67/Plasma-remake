@@ -14,6 +14,7 @@ local Camera = Workspace.CurrentCamera
 -- Config
 local Config = {
     StealSpeed = 30,
+    WalkSpeed = 59,
     GrabRadius = 20,
     Gravity = 120,
     GalaxyGravityPercent = 70,
@@ -48,16 +49,18 @@ local function saveConfig()
         if v then data.Keybinds[k] = v.Name end
     end
     pcall(function()
-        data.Features.SpeedBoost = SpeedBoostBtn and SpeedBoostBtn.BackgroundColor3 == ACCENT or false
-        data.Features.AutoSteal = AutoStealBtn and AutoStealBtn.BackgroundColor3 == ACCENT or false
-        data.Features.BatAimbot = BatAimbotBtn and BatAimbotBtn.BackgroundColor3 == ACCENT or false
-        data.Features.Galaxy = GalaxyBtn and GalaxyBtn.BackgroundColor3 == ACCENT or false
-        data.Features.Optimizer = OptimizerBtn and OptimizerBtn.BackgroundColor3 == ACCENT or false
+        data.Features.SpeedBoost  = SpeedBoostBtn  and SpeedBoostBtn.BackgroundColor3  == ACCENT or false
+        data.Features.AutoSteal   = AutoStealBtn   and AutoStealBtn.BackgroundColor3   == ACCENT or false
+        data.Features.BatAimbot   = BatAimbotBtn   and BatAimbotBtn.BackgroundColor3   == ACCENT or false
+        data.Features.Galaxy      = GalaxyBtn      and GalaxyBtn.BackgroundColor3      == ACCENT or false
+        data.Features.Optimizer   = OptimizerBtn   and OptimizerBtn.BackgroundColor3   == ACCENT or false
         data.Features.AntiRagdoll = AntiRagdollBtn and AntiRagdollBtn.BackgroundColor3 == ACCENT or false
-        data.Features.NoAnimations = NoAnimBtn and NoAnimBtn.BackgroundColor3 == ACCENT or false
+        data.Features.NoAnimations= NoAnimBtn      and NoAnimBtn.BackgroundColor3      == ACCENT or false
     end)
     pcall(function() writefile("SecretDuel_Config.json", HttpService:JSONEncode(data)) end)
 end
+
+
 
 local function loadConfig()
     pcall(function()
@@ -395,6 +398,7 @@ local HopPowerInput          = createNumberInput(SettingsFrame, "HopPower",     
 local AimbotRadiusInput      = createNumberInput(SettingsFrame, "AimbotRadius",         "Aimbot Radius",        Config.AimbotRadius,         200)
 local AimbotSpeedInput       = createNumberInput(SettingsFrame, "BatAimbotSpeed",       "Aimbot Speed",         Config.BatAimbotSpeed,       250)
 
+local WalkSpeedInput         = createNumberInput(SettingsFrame, "WalkSpeed",            "Walk Speed",           Config.WalkSpeed,            300)
 local SaveButton = Instance.new("TextButton")
 SaveButton.Size = UDim2.new(1, -10, 0, 40)
 SaveButton.Position = UDim2.new(0, 5, 0, 305)
@@ -509,7 +513,7 @@ local rightTargets = {
     Vector3.new(-482.8011474609375, -4.433956623077393, 24.77419090270996)
 }
 
-local speed = 59
+local speed = Config.WalkSpeed or 59
 local AUTO_STEAL_PROX_RADIUS = Config.GrabRadius
 local allAnimalsCache = {}
 local PromptMemoryCache = {}
@@ -780,13 +784,13 @@ local function steal(prompt)
         if #d.h > 0 or #d.t > 0 then
             for _, f in ipairs(d.h) do task.spawn(function() pcall(f) end) end
             local s = tick()
-            while tick() - s < 1.3 do StealProgress = (tick()-s)/1.3; task.wait() end
+            while tick() - s < 0.05 do StealProgress = (tick()-s)/0.05; task.wait() end
             StealProgress = 1
             for _, f in ipairs(d.t) do task.spawn(function() pcall(f) end) end
         else
             if fireproximityprompt then fireproximityprompt(prompt) end
             local s = tick()
-            while tick() - s < 1.3 do StealProgress = (tick()-s)/1.3; task.wait() end
+            while tick() - s < 0.05 do StealProgress = (tick()-s)/0.05; task.wait() end
             StealProgress = 1
         end
         task.wait(0.2); IsStealing = false; StealProgress = 0; d.r = true
@@ -853,14 +857,31 @@ end
 local function moveToTargets(targetList)
     local character = player.Character or player.CharacterAdded:Wait()
     local hrp = character:WaitForChild("HumanoidRootPart")
+    local hum = character:FindFirstChildOfClass("Humanoid")
     for i, target in ipairs(targetList) do
-        while (hrp.Position - target).Magnitude > 1 do
-            if not leftActive and not rightActive then return end
-            hrp.Velocity = (target - hrp.Position).Unit * speed
+        while true do
+            hrp = getHRP(); if not hrp then break end
+            if not leftActive and not rightActive then
+                if hrp then hrp.AssemblyLinearVelocity = Vector3.zero end
+                if hum then hum:Move(Vector3.zero, false) end
+                return
+            end
+            local diff = target - hrp.Position
+            local flat = Vector3.new(diff.X, 0, diff.Z)
+            if flat.Magnitude <= 1.5 then
+                hrp.AssemblyLinearVelocity = Vector3.zero
+                break
+            end
+            local dir = flat.Unit
+            hum = character:FindFirstChildOfClass("Humanoid")
+            if hum then hum:Move(dir, false) end
+            hrp.AssemblyLinearVelocity = Vector3.new(dir.X * speed, hrp.AssemblyLinearVelocity.Y, dir.Z * speed)
             RunService.RenderStepped:Wait()
         end
     end
-    hrp.Velocity = Vector3.new(0, 0, 0)
+    if hrp then hrp.AssemblyLinearVelocity = Vector3.zero end
+    local hum2 = (player.Character or player.CharacterAdded:Wait()):FindFirstChildOfClass("Humanoid")
+    if hum2 then hum2:Move(Vector3.zero, false) end
 end
 
 -- Button handlers
@@ -1090,104 +1111,101 @@ end)
 -- auto play handler above
 
 MobileLeftMobBtn.MouseButton1Click:Connect(function()
-    local isOn = MobileLeftMobBtn.BackgroundColor3 == ACCENT
-    if isOn then
+    if leftActive then
         leftActive = false
         MobileLeftMobBtn.BackgroundColor3 = BG_CARD
         MobileLeftMobBtn.TextColor3 = Color3.fromRGB(255,255,255)
+        local h = getHRP(); if h then h.AssemblyLinearVelocity = Vector3.zero end
+        local hum = getHum(); if hum then hum:Move(Vector3.zero, false) end
         return
     end
-    updateToggle(AutoRightBtn, false)
-    MobileRightMobBtn.BackgroundColor3 = BG_CARD
-    MobileRightMobBtn.TextColor3 = Color3.fromRGB(255,255,255)
+    leftActive = true; rightActive = false
     MobileLeftMobBtn.BackgroundColor3 = ACCENT
     MobileLeftMobBtn.TextColor3 = BG_DARK
-    leftActive = true
+    MobileRightMobBtn.BackgroundColor3 = BG_CARD
+    MobileRightMobBtn.TextColor3 = Color3.fromRGB(255,255,255)
     task.spawn(function()
-        -- Go LEFT
-        moveToTargets(leftTargets)
-        if not leftActive then return end
-        -- Wait for steal (1.8 seconds)
-        task.wait(1.8)
-        if not leftActive then return end
-        -- Come back RIGHT slowly (walk speed)
-        local hrp = getHRP()
-        if hrp then
-            for _, tgt in ipairs(rightTargets) do
-                if not leftActive then break end
-                local arrived = false
-                local wc
-                wc = RunService.Heartbeat:Connect(function()
-                    local h = getHRP(); if not h then arrived=true; return end
-                    local hum2 = getHum(); if not hum2 then arrived=true; return end
-                    local dist = (Vector3.new(tgt.X,h.Position.Y,tgt.Z)-h.Position).Magnitude
-                    if dist < 1.5 then
-                        arrived=true; h.AssemblyLinearVelocity=Vector3.zero
-                        hum2:Move(Vector3.zero,false); pcall(function() wc:Disconnect() end); return
+        while leftActive do
+            -- Step 1: Go to LEFT (enemy base) fast
+            moveToTargets(leftTargets)
+            if not leftActive then break end
+            -- Step 2: Wait for steal
+            task.wait(0.25)
+            if not leftActive then break end
+            -- Step 3: Return to RIGHT - go slightly right first to avoid wall
+            local oldSpeed = speed
+            speed = Config.StealSpeed
+            local hrpNow = getHRP()
+            if hrpNow then
+                local sidePos = Vector3.new(hrpNow.Position.X + 8, hrpNow.Position.Y, hrpNow.Position.Z)
+                local hrpR = getHRP(); if hrpR then
+                    local dir = Vector3.new(8,0,0).Unit
+                    for i=1,6 do if not leftActive then break end
+                        hrpR = getHRP(); if not hrpR then break end
+                        hrpR.AssemblyLinearVelocity = Vector3.new(dir.X*Config.StealSpeed,hrpR.AssemblyLinearVelocity.Y,dir.Z*Config.StealSpeed)
+                        task.wait(0.05)
                     end
-                    local d = tgt - h.Position
-                    local m = Vector3.new(d.X,0,d.Z).Unit
-                    hum2:Move(m,false)
-                    h.AssemblyLinearVelocity = Vector3.new(m.X*16, h.AssemblyLinearVelocity.Y, m.Z*16)
-                end)
-                local t0 = tick()
-                while not arrived and tick()-t0 < 15 and leftActive do task.wait(0.05) end
-                pcall(function() wc:Disconnect() end)
+                end
             end
+            moveToTargets({rightTargets[1], rightTargets[2]})
+            speed = oldSpeed
+            if not leftActive then break end
+            -- Step 4: Short pause then loop again
+            task.wait(0.3)
         end
         leftActive = false
+        local h = getHRP(); if h then h.AssemblyLinearVelocity = Vector3.zero end
+        local hum = getHum(); if hum then hum:Move(Vector3.zero, false) end
         MobileLeftMobBtn.BackgroundColor3 = BG_CARD
         MobileLeftMobBtn.TextColor3 = Color3.fromRGB(255,255,255)
     end)
 end)
 
 MobileRightMobBtn.MouseButton1Click:Connect(function()
-    local isOn = MobileRightMobBtn.BackgroundColor3 == ACCENT
-    if isOn then
+    if rightActive then
         rightActive = false
         MobileRightMobBtn.BackgroundColor3 = BG_CARD
         MobileRightMobBtn.TextColor3 = Color3.fromRGB(255,255,255)
+        local h = getHRP(); if h then h.AssemblyLinearVelocity = Vector3.zero end
+        local hum = getHum(); if hum then hum:Move(Vector3.zero, false) end
         return
     end
-    updateToggle(AutoLeftBtn, false)
-    MobileLeftMobBtn.BackgroundColor3 = BG_CARD
-    MobileLeftMobBtn.TextColor3 = Color3.fromRGB(255,255,255)
+    rightActive = true; leftActive = false
     MobileRightMobBtn.BackgroundColor3 = ACCENT
     MobileRightMobBtn.TextColor3 = BG_DARK
-    rightActive = true
+    MobileLeftMobBtn.BackgroundColor3 = BG_CARD
+    MobileLeftMobBtn.TextColor3 = Color3.fromRGB(255,255,255)
     task.spawn(function()
-        -- Go RIGHT
-        moveToTargets(rightTargets)
-        if not rightActive then return end
-        -- Wait for steal (1.8 seconds)
-        task.wait(1.8)
-        if not rightActive then return end
-        -- Come back LEFT slowly (walk speed)
-        local hrp = getHRP()
-        if hrp then
-            for _, tgt in ipairs(leftTargets) do
-                if not rightActive then break end
-                local arrived = false
-                local wc
-                wc = RunService.Heartbeat:Connect(function()
-                    local h = getHRP(); if not h then arrived=true; return end
-                    local hum2 = getHum(); if not hum2 then arrived=true; return end
-                    local dist = (Vector3.new(tgt.X,h.Position.Y,tgt.Z)-h.Position).Magnitude
-                    if dist < 1.5 then
-                        arrived=true; h.AssemblyLinearVelocity=Vector3.zero
-                        hum2:Move(Vector3.zero,false); pcall(function() wc:Disconnect() end); return
+        while rightActive do
+            -- Step 1: Go to LEFT (enemy base) fast
+            moveToTargets(leftTargets)
+            if not rightActive then break end
+            -- Step 2: Wait for steal
+            task.wait(0.25)
+            if not rightActive then break end
+            -- Step 3: Return to RIGHT - go slightly right first to avoid wall
+            local oldSpeed = speed
+            speed = Config.StealSpeed
+            local hrpNow2 = getHRP()
+            if hrpNow2 then
+                local hrpR2 = getHRP(); if hrpR2 then
+                    local dir2 = Vector3.new(8,0,0).Unit
+                    for i=1,6 do if not rightActive then break end
+                        hrpR2 = getHRP(); if not hrpR2 then break end
+                        hrpR2.AssemblyLinearVelocity = Vector3.new(dir2.X*Config.StealSpeed,hrpR2.AssemblyLinearVelocity.Y,dir2.Z*Config.StealSpeed)
+                        task.wait(0.05)
                     end
-                    local d = tgt - h.Position
-                    local m = Vector3.new(d.X,0,d.Z).Unit
-                    hum2:Move(m,false)
-                    h.AssemblyLinearVelocity = Vector3.new(m.X*16, h.AssemblyLinearVelocity.Y, m.Z*16)
-                end)
-                local t0 = tick()
-                while not arrived and tick()-t0 < 15 and rightActive do task.wait(0.05) end
-                pcall(function() wc:Disconnect() end)
+                end
             end
+            moveToTargets({rightTargets[1], rightTargets[2]})
+            speed = oldSpeed
+            if not rightActive then break end
+            -- Step 4: Short pause then loop again
+            task.wait(0.3)
         end
         rightActive = false
+        local h = getHRP(); if h then h.AssemblyLinearVelocity = Vector3.zero end
+        local hum = getHum(); if hum then hum:Move(Vector3.zero, false) end
         MobileRightMobBtn.BackgroundColor3 = BG_CARD
         MobileRightMobBtn.TextColor3 = Color3.fromRGB(255,255,255)
     end)
@@ -1330,12 +1348,10 @@ end)
 ScreenGui.Parent = player:WaitForChild("PlayerGui")
 
 task.spawn(function()
-    for i = 0, 1, 0.05 do MainFrame.BackgroundTransparency = 1 - i; task.wait(0.02) end
+    for i = 0, 1, 0.05 do MainFrame.BackgroundTransparency = 1 - i; task.wait(0.01) end
 end)
 
 task.spawn(function() initAutoStealGUI(); createCircle() end)
 
 -- Auto-enable steal by default
 updateToggle(AutoStealBtn, true)
-
-print("SECRET DUEL Loaded! discord.gg/JaFSsH8RrU")
