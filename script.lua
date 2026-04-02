@@ -129,16 +129,38 @@ local function startAntiRagdoll()
         local root = char:FindFirstChild("HumanoidRootPart")
         local hum = char:FindFirstChildOfClass("Humanoid")
         if hum then
+            -- Fix ragdoll/physics states
             local humState = hum:GetState()
-            if humState == Enum.HumanoidStateType.Physics or humState == Enum.HumanoidStateType.Ragdoll or humState == Enum.HumanoidStateType.FallingDown then
+            if humState == Enum.HumanoidStateType.Physics
+            or humState == Enum.HumanoidStateType.Ragdoll
+            or humState == Enum.HumanoidStateType.FallingDown then
                 hum:ChangeState(Enum.HumanoidStateType.Running)
                 workspace.CurrentCamera.CameraSubject = hum
-                if root then root.Velocity = Vector3.new(0,0,0); root.RotVelocity = Vector3.new(0,0,0) end
+                if root then
+                    root.AssemblyLinearVelocity = Vector3.zero
+                    root.AssemblyAngularVelocity = Vector3.zero
+                end
+            end
+            -- Fix WalkSpeed/JumpPower being set to 0 (Medusa/freeze effects)
+            if hum.WalkSpeed == 0 then hum.WalkSpeed = 16 end
+            if hum.JumpPower == 0 then hum.JumpPower = 50 end
+            -- Re-enable movement
+            hum.AutoRotate = true
+        end
+        -- Re-enable all Motor6D (fixes frozen joints from Medusa)
+        for _, obj in ipairs(char:GetDescendants()) do
+            if obj:IsA("Motor6D") and obj.Enabled == false then
+                obj.Enabled = true
             end
         end
-        for _, obj in ipairs(char:GetDescendants()) do
-            if obj:IsA("Motor6D") and obj.Enabled == false then obj.Enabled = true end
-        end
+        -- Remove any freeze/stun effects
+        pcall(function()
+            for _, v in ipairs(char:GetChildren()) do
+                if v:IsA("BodyVelocity") or v:IsA("BodyPosition") then
+                    v:Destroy()
+                end
+            end
+        end)
     end)
 end
 
@@ -1177,30 +1199,19 @@ MobileRightMobBtn.MouseButton1Click:Connect(function()
     MobileLeftMobBtn.TextColor3 = Color3.fromRGB(255,255,255)
     task.spawn(function()
         while rightActive do
-            -- Step 1: Go to LEFT (enemy base) fast
-            moveToTargets(leftTargets)
+            -- Step 1: Go to RIGHT (enemy base)
+            moveToTargets(rightTargets)
             if not rightActive then break end
-            -- Step 2: Wait for steal
+            -- Step 2: Wait 0.25s
             task.wait(0.25)
             if not rightActive then break end
-            -- Step 3: Return to RIGHT - go slightly right first to avoid wall
+            -- Step 3: Return - go to safe exit point first, then left base
             local oldSpeed = speed
             speed = Config.StealSpeed
-            local hrpNow2 = getHRP()
-            if hrpNow2 then
-                local hrpR2 = getHRP(); if hrpR2 then
-                    local dir2 = Vector3.new(8,0,0).Unit
-                    for i=1,6 do if not rightActive then break end
-                        hrpR2 = getHRP(); if not hrpR2 then break end
-                        hrpR2.AssemblyLinearVelocity = Vector3.new(dir2.X*Config.StealSpeed,hrpR2.AssemblyLinearVelocity.Y,dir2.Z*Config.StealSpeed)
-                        task.wait(0.05)
-                    end
-                end
-            end
-            moveToTargets({rightTargets[1], rightTargets[2]})
+            local safeExit = Vector3.new(-473.22, -7.0, 26.59)
+            moveToTargets({safeExit, leftTargets[1], leftTargets[2]})
             speed = oldSpeed
             if not rightActive then break end
-            -- Step 4: Short pause then loop again
             task.wait(0.3)
         end
         rightActive = false
