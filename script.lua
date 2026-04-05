@@ -1,20 +1,3 @@
-local function doInstantSteal()
-    local h=getHRP(); if not h then return end
-    local best,bd=nil,math.huge
-    for _,v in ipairs(workspace:GetDescendants()) do
-        if v:IsA("ProximityPrompt") and v.Parent then
-            local ok,pos=pcall(function() return v.Parent.Position end)
-            if ok then local d=(pos-h.Position).Magnitude; if d<bd then bd=d;best=v end end
-        end
-    end
-    if not best then return end
-    if not InternalStealCache[best] then build(best) end
-    local d=InternalStealCache[best]; if not d or not d.r then return end
-    d.r=false
-    if #d.h>0 or #d.t>0 then for i=1,#d.h do pcall(d.h[i]) end; for i=1,#d.t do pcall(d.t[i]) end
-    elseif fireproximityprompt then fireproximityprompt(best) end
-    d.r=true
-end
 local function setCollide(v) local c=player.Character; if c then for _,p in ipairs(c:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide=v end end end end
 local Players = game:GetService("Players"); local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService"); local UserInputService = game:GetService("UserInputService")
@@ -88,7 +71,6 @@ local lastHopTime = 0
 local spaceHeld = false
 local originalJumpPower = 50
 local DEFAULT_GRAVITY = 196.2
-local antiRagdollConn = nil
 local infJumpEnabled = true
 local jumpForce = 54
 local clampFallSpeed = 80
@@ -109,27 +91,62 @@ RunService.Heartbeat:Connect(function() if not infJumpEnabled then return end
     end
 end)
 startInfJump()
+local arMode=nil
+local arConns={}
+local arChar={}
+local arBoosting=false
+local function arCache()
+    local c=player.Character; if not c then return false end
+    local h=c:FindFirstChildOfClass("Humanoid"); local r=c:FindFirstChild("HumanoidRootPart")
+    if not h or not r then return false end
+    arChar={character=c,humanoid=h,root=r}; return true
+end
+local function arDisconnect()
+    for _,c in ipairs(arConns) do pcall(function() c:Disconnect() end) end
+    arConns={}
+end
+local function arIsRagdolled()
+    if not arChar.humanoid then return false end
+    local s=arChar.humanoid:GetState()
+    if s==Enum.HumanoidStateType.Physics or s==Enum.HumanoidStateType.Ragdoll or s==Enum.HumanoidStateType.FallingDown then return true end
+    local e=player:GetAttribute("RagdollEndTime")
+    if e and (e-workspace:GetServerTimeNow())>0 then return true end
+    return false
+end
+local function arForceExit()
+    if not arChar.humanoid or not arChar.root then return end
+    pcall(function() player:SetAttribute("RagdollEndTime",workspace:GetServerTimeNow()) end)
+    for _,d in ipairs(arChar.character:GetDescendants()) do
+        if d:IsA("BallSocketConstraint") or (d:IsA("Attachment") and d.Name:find("RagdollAttachment")) then d:Destroy() end
+    end
+    if not arBoosting then arBoosting=true; arChar.humanoid.WalkSpeed=400 end
+    if arChar.humanoid.Health>0 then arChar.humanoid:ChangeState(Enum.HumanoidStateType.Running) end
+    arChar.root.Anchored=false
+end
 local function startAntiRagdoll()
-    if antiRagdollConn then return end
-    antiRagdollConn=RunService.Heartbeat:Connect(function()
-        local char=player.Character; if not char then return end
-        local root=char:FindFirstChild("HumanoidRootPart"); local hum=char:FindFirstChildOfClass("Humanoid")
-        if hum then
-            local s=hum:GetState()
-            if s==Enum.HumanoidStateType.Physics or s==Enum.HumanoidStateType.Ragdoll or s==Enum.HumanoidStateType.FallingDown then
-                hum:ChangeState(Enum.HumanoidStateType.Running); workspace.CurrentCamera.CameraSubject=hum
-                if root then root.AssemblyLinearVelocity=Vector3.zero; root.AssemblyAngularVelocity=Vector3.zero end
-            end
-            if hum.WalkSpeed==0 then hum.WalkSpeed=16 end
-            if hum.JumpPower==0 then hum.JumpPower=50 end
-            hum.AutoRotate=true
+    if antiRagdollConn then antiRagdollConn:Disconnect(); antiRagdollConn=nil end
+    if arMode=="v1" then return end
+    if not arCache() then return end
+    arMode="v1"
+    table.insert(arConns,RunService.RenderStepped:Connect(function()
+        if workspace.CurrentCamera and arChar.humanoid then workspace.CurrentCamera.CameraSubject=arChar.humanoid end
+    end))
+    table.insert(arConns,player.CharacterAdded:Connect(function()
+        arBoosting=false; task.wait(0.5); arCache()
+    end))
+    task.spawn(function()
+        while arMode=="v1" do
+            task.wait()
+            if arIsRagdolled() then arForceExit()
+            elseif arBoosting then arBoosting=false; if arChar.humanoid then arChar.humanoid.WalkSpeed=16 end end
         end
-        for _,o in ipairs(char:GetDescendants()) do if o:IsA("Motor6D") and not o.Enabled then o.Enabled=true end end
-        pcall(function() for _,v in ipairs(char:GetChildren()) do if v:IsA("BodyVelocity") or v:IsA("BodyPosition") then v:Destroy() end end end)
     end)
 end
 local function stopAntiRagdoll()
-    if antiRagdollConn then antiRagdollConn:Disconnect(); antiRagdollConn = nil end
+    arMode=nil
+    if arBoosting and arChar.humanoid then arChar.humanoid.WalkSpeed=16 end
+    arBoosting=false; arDisconnect(); arChar={}
+    if antiRagdollConn then antiRagdollConn:Disconnect(); antiRagdollConn=nil end
 end
 local EnableAntiRagdoll = startAntiRagdoll
 local DisableAntiRagdoll = stopAntiRagdoll
@@ -276,7 +293,6 @@ local function makeTab(name, text, xPos, active)
     return tab
 end
 local FeaturesTab = makeTab("FeaturesTab", "FEATURES", 0, true)
-local KeybindsTab = makeTab("KeybindsTab", "KEYBINDS", 0.26, false)
 local SettingsTab  = makeTab("SettingsTab",  "SETTINGS",  0.52, false)
 local MobileTab    = makeTab("MobileTab",    "MOBILE",    0.78, false)
 local function makeScrollFrame(visible)
@@ -291,8 +307,8 @@ end
 local FeaturesFrame = makeScrollFrame(true); local KeybindsFrame = makeScrollFrame(false)
 local SettingsFrame = makeScrollFrame(false); local MobileFrame   = makeScrollFrame(false)
 local function switchTabs(active)
-    local tabs = {FeaturesTab, KeybindsTab, SettingsTab, MobileTab}
-    local frames = {FeaturesFrame, KeybindsFrame, SettingsFrame, MobileFrame}
+    local tabs = {FeaturesTab, SettingsTab, MobileTab}
+    local frames = {FeaturesFrame, SettingsFrame, MobileFrame}
     for i, t in ipairs(tabs) do
         local on = (t == active) t.BackgroundColor3 = on and ACCENT or BG_CARD
         t.TextColor3 = on and BG_DARK or TEXT_DIM
@@ -323,8 +339,7 @@ local function updateToggle(button, active)
     local textColor = active and BG_DARK or Color3.fromRGB(255,255,255)
     TweenService:Create(button, TweenInfo.new(0.2), {BackgroundColor3 = targetColor}):Play() button.TextColor3 = textColor
 end
-local function createKeybindButton(parent, name, text, currentKey, yPos)
-    local container = Instance.new("Frame"); container.Size = UDim2.new(1, -10, 0, 50)
+local function     local container = Instance.new("Frame"); container.Size = UDim2.new(1, -10, 0, 50)
     container.Position = UDim2.new(0, 5, 0, yPos) container.BackgroundColor3 = BG_CARD
     container.BorderSizePixel = 0
     container.Parent = parent
@@ -389,13 +404,6 @@ local FlyBtn         = createToggle(FeaturesFrame, "FlyOn",        "Fly",       
 local InfJumpBtn     = createToggle(FeaturesFrame, "InfJump",      "Inf Jump",       450)
 local NoclipBtn      = createToggle(FeaturesFrame, "Noclip",       "Noclip",         495)
 local FullbrightBtn  = createToggle(FeaturesFrame, "Fullbright",   "Fullbright",     540)
-local AutoLeftKey    = createKeybindButton(KeybindsFrame, "AutoLeft",     "Auto Left Keybind",     Keybinds.AutoLeft,     0)
-local AutoRightKey   = createKeybindButton(KeybindsFrame, "AutoRight",    "Auto Right Keybind",    Keybinds.AutoRight,    55)
-local SpeedBoostKey  = createKeybindButton(KeybindsFrame, "SpeedBoost",   "Speed Boost Keybind",   Keybinds.SpeedBoost,   110)
-local AutoStealKey   = createKeybindButton(KeybindsFrame, "AutoSteal",    "Auto Steal Keybind",    Keybinds.AutoSteal,    165)
-local BatAimbotKey   = createKeybindButton(KeybindsFrame, "BatAimbot",    "Bat Aimbot Keybind",    Keybinds.BatAimbot,    220)
-local AntiRagdollKey = createKeybindButton(KeybindsFrame, "AntiRagdoll",  "Anti Ragdoll Keybind",  Keybinds.AntiRagdoll,  275)
-local NoAnimKey      = createKeybindButton(KeybindsFrame, "NoAnimations", "No Anim Keybind",       Keybinds.NoAnimations, 330)
 local SpeedBoostInput        = createNumberInput(SettingsFrame, "SpeedBoost",           "Speed While Stealing", Config.SpeedBoost,          0)
 local GrabRadiusInput        = createNumberInput(SettingsFrame, "GrabRadius",           "Grab Radius",          Config.GrabRadius,           50)
 local GalaxyGravityInput     = createNumberInput(SettingsFrame, "GalaxyGravityPercent", "Gravity",              Config.GalaxyGravityPercent, 100)
@@ -753,14 +761,27 @@ local function initAutoStealGUI()
     radiusText.BackgroundTransparency = 1; radiusText.Text = tostring(Config.GrabRadius)
     radiusText.Font = Enum.Font.GothamBold; radiusText.TextSize = 13; radiusText.TextColor3 = ACCENT
     radiusText.Parent = frame
-    task.spawn(function() while autoStealGui and autoStealGui.Parent do
-            task.wait(0.03); if AutoStealBtn.BackgroundColor3 == ACCENT then
-                AUTO_STEAL_PROX_RADIUS = Config.GrabRadius; radiusText.Text = tostring(Config.GrabRadius)
-            end
-            if fill and fill.Parent then
-                if IsStealing then fill.Size = UDim2.new(StealProgress, 0, 1, 0)
-                else fill.Size = UDim2.new(math.max(0, fill.Size.X.Scale - 0.05), 0, 1, 0) end
-            end
+    task.spawn(function()
+        local prev=false
+        while autoStealGui and autoStealGui.Parent do
+            task.wait(0.03)
+            if AutoStealBtn.BackgroundColor3==ACCENT then
+                AUTO_STEAL_PROX_RADIUS=Config.GrabRadius; radiusText.Text=tostring(Config.GrabRadius)
+                local h=getHRP(); local inR=false
+                if h then
+                    for _,v in ipairs(workspace:GetDescendants()) do
+                        if v:IsA("ProximityPrompt") then
+                            local ok,p=pcall(function() return v.Parent.Position end)
+                            if ok and (p-h.Position).Magnitude<=AUTO_STEAL_PROX_RADIUS then inR=true; break end
+                        end
+                    end
+                end
+                if fill and fill.Parent then
+                    if inR and not prev then for i=1,20 do fill.Size=UDim2.new(i/20,0,1,0); task.wait(0.008) end; fill.Size=UDim2.new(0,0,1,0)
+                    elseif not inR then fill.Size=UDim2.new(0,0,1,0) end
+                end
+                prev=inR
+            else if fill and fill.Parent then fill.Size=UDim2.new(0,0,1,0) end; prev=false end
         end
     end)
 end
@@ -864,16 +885,19 @@ UserInputService.InputBegan:Connect(function(input, processed) if processed then
     if Keybinds.AutoLeft     and input.KeyCode == Keybinds.AutoLeft     then
         local newState = AutoLeftBtn.BackgroundColor3 ~= ACCENT
         updateToggle(AutoLeftBtn, newState)
-        if newState then updateToggle(AutoRightBtn, false); leftActive = true; task.spawn(function() moveToTargets(leftTargets); leftActive = false; updateToggle(AutoLeftBtn, false) end) else leftActive = false end
+        if newState then updateToggle(AutoRightBtn, false)
+        leftActive = true; task.spawn(function() moveToTargets(leftTargets); leftActive = false; updateToggle(AutoLeftBtn, false) end) else leftActive = false end
     elseif Keybinds.AutoRight  and input.KeyCode == Keybinds.AutoRight  then
         local newState = AutoRightBtn.BackgroundColor3 ~= ACCENT
         updateToggle(AutoRightBtn, newState)
-        if newState then updateToggle(AutoLeftBtn, false); rightActive = true; task.spawn(function() moveToTargets(rightTargets); rightActive = false; updateToggle(AutoRightBtn, false) end) else rightActive = false end
+        if newState then updateToggle(AutoLeftBtn, false)
+        rightActive = true; task.spawn(function() moveToTargets(rightTargets); rightActive = false; updateToggle(AutoRightBtn, false) end) else rightActive = false end
     elseif Keybinds.SpeedBoost and input.KeyCode == Keybinds.SpeedBoost then tog(SpeedBoostBtn,  startSpeedBoost, stopSpeedBoost)
     elseif Keybinds.AutoSteal  and input.KeyCode == Keybinds.AutoSteal  then
         local newState = AutoStealBtn.BackgroundColor3 ~= ACCENT
         updateToggle(AutoStealBtn, newState); if newState then task.spawn(function() initAutoStealGUI(); createCircle() end)
-        else if autoStealGui then pcall(function() autoStealGui:Destroy() end); autoStealGui = nil end; for _, p in ipairs(circleParts) do if p then pcall(function() p:Destroy() end) end end; table.clear(circleParts) end
+        else if autoStealGui then pcall(function() autoStealGui:Destroy() end)
+        autoStealGui = nil end; for _, p in ipairs(circleParts) do if p then pcall(function() p:Destroy() end) end end; table.clear(circleParts) end
     elseif Keybinds.BatAimbot  and input.KeyCode == Keybinds.BatAimbot  then tog(BatAimbotBtn,   startBatAimbot,  stopBatAimbot)
     elseif Keybinds.AntiRagdoll and input.KeyCode == Keybinds.AntiRagdoll then tog(AntiRagdollBtn, EnableAntiRagdoll, DisableAntiRagdoll)
     elseif Keybinds.NoAnimations and input.KeyCode == Keybinds.NoAnimations then
@@ -881,16 +905,19 @@ UserInputService.InputBegan:Connect(function(input, processed) if processed then
         updateToggle(NoAnimBtn, newState); toggleNoAnimations(newState)
     end
 end)
-RunService.Heartbeat:Connect(function() if AutoStealBtn.BackgroundColor3 ~= ACCENT or IsStealing then return end
-    local hrp = getHRP(); if not hrp then return end
-    local best, dist = nil, math.huge
-    for _, a in ipairs(allAnimalsCache) do
-        local d = (hrp.Position - a.worldPosition).Magnitude
-        if d < dist then dist = d; best = a end
+RunService.Heartbeat:Connect(function()
+    if AutoStealBtn.BackgroundColor3~=ACCENT then return end
+    local hrp=getHRP(); if not hrp then return end
+    for _,a in ipairs(allAnimalsCache) do
+        if (hrp.Position-a.worldPosition).Magnitude<=AUTO_STEAL_PROX_RADIUS then
+            local p=findPrompt(a); if not p then continue end
+            build(p)
+            local d=InternalStealCache[p]; if not d then continue end
+            if #d.h>0 then for i=1,#d.h do pcall(d.h[i]) end end
+            if #d.t>0 then for i=1,#d.t do pcall(d.t[i]) end end
+            if #d.h==0 and #d.t==0 and fireproximityprompt then fireproximityprompt(p) end
+        end
     end
-    if not best or dist > AUTO_STEAL_PROX_RADIUS then return end
-    local p = findPrompt(best); if not p then return end
-    build(p); steal(p)
 end)
 RunService.RenderStepped:Connect(function() if AutoStealBtn.BackgroundColor3 ~= ACCENT then return end
     local hrp = getHRP(); if not hrp then return end
@@ -967,31 +994,46 @@ local MobileRightMobBtn = createMobileButton("SECRET RIGHT", UDim2.new(0,10,0.3,
 MobileSupportBtn.MouseButton1Click:Connect(function() local newState = MobileSupportBtn.BackgroundColor3 ~= ACCENT
     updateToggle(MobileSupportBtn, newState); MobileButtonsGui.Enabled = newState
 end)
+local function stealNearby()
+    local h=getHRP(); if not h then return end
+    for _,v in ipairs(workspace:GetDescendants()) do
+        if v:IsA("ProximityPrompt") then
+            local ok,p=pcall(function() return v.Parent.Position end)
+            if ok and (p-h.Position).Magnitude<20 then
+                if not InternalStealCache[v] then build(v) end
+                local d=InternalStealCache[v]
+                if d then
+                    if #d.h>0 then for i=1,#d.h do pcall(d.h[i]) end end
+                    if #d.t>0 then for i=1,#d.t do pcall(d.t[i]) end end
+                    if #d.h==0 and #d.t==0 and fireproximityprompt then fireproximityprompt(v) end
+                end; break
+            end
+        end
+    end
+end
 MobileLeftMobBtn.MouseButton1Click:Connect(function()
     if leftActive then
         leftActive=false; MobileLeftMobBtn.BackgroundColor3=BG_CARD; MobileLeftMobBtn.TextColor3=Color3.fromRGB(255,255,255)
-        local h=getHRP(); if h then h.AssemblyLinearVelocity=Vector3.zero end; local hm=getHum(); if hm then hm:Move(Vector3.zero,false) end; return
+        local h=getHRP(); if h then h.AssemblyLinearVelocity=Vector3.zero end
+        local hm=getHum(); if hm then hm:Move(Vector3.zero,false) end; return
     end
     leftActive=true; rightActive=false
     MobileLeftMobBtn.BackgroundColor3=ACCENT; MobileLeftMobBtn.TextColor3=BG_DARK
     MobileRightMobBtn.BackgroundColor3=BG_CARD; MobileRightMobBtn.TextColor3=Color3.fromRGB(255,255,255)
     task.spawn(function()
         while leftActive do
-            setCollide(false)
-            moveToTargets(leftTargets); if not leftActive then break end
-            setCollide(true)
-            -- INSTANT STEAL - no wait
-            doInstantSteal()
+            moveToTargets(leftTargets)
             if not leftActive then break end
-            -- Noclip during return
-            char=player.Character; if char then for _,p in ipairs(char:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide=false end end end
-            local dir=Vector3.new(8,0,0).Unit
-            for i=1,6 do if not leftActive then break end local h=getHRP(); if not h then break end
-                h.AssemblyLinearVelocity=Vector3.new(dir.X*Config.StealSpeed,h.AssemblyLinearVelocity.Y,dir.Z*Config.StealSpeed); task.wait(0.05)
-            end
-            local os=speed; speed=Config.StealSpeed; moveToTargets({rightTargets[1],rightTargets[2]}); speed=os
-            setCollide(true)
-            if not leftActive then break end; task.wait(0.1)
+            task.wait(0.25)
+            if not leftActive then break end
+            stealNearby()
+            if not leftActive then break end
+            local os=speed; speed=Config.StealSpeed
+            local safePoint=Vector3.new(-474.6,-7.01,94.19)
+            moveToTargets({safePoint,rightTargets[1],rightTargets[2]})
+            speed=os
+            if not leftActive then break end
+            task.wait(0.1)
         end
         leftActive=false; MobileLeftMobBtn.BackgroundColor3=BG_CARD; MobileLeftMobBtn.TextColor3=Color3.fromRGB(255,255,255)
         local h=getHRP(); if h then h.AssemblyLinearVelocity=Vector3.zero end
@@ -1000,25 +1042,26 @@ end)
 MobileRightMobBtn.MouseButton1Click:Connect(function()
     if rightActive then
         rightActive=false; MobileRightMobBtn.BackgroundColor3=BG_CARD; MobileRightMobBtn.TextColor3=Color3.fromRGB(255,255,255)
-        local h=getHRP(); if h then h.AssemblyLinearVelocity=Vector3.zero end; local hm=getHum(); if hm then hm:Move(Vector3.zero,false) end; return
+        local h=getHRP(); if h then h.AssemblyLinearVelocity=Vector3.zero end
+        local hm=getHum(); if hm then hm:Move(Vector3.zero,false) end; return
     end
     rightActive=true; leftActive=false
     MobileRightMobBtn.BackgroundColor3=ACCENT; MobileRightMobBtn.TextColor3=BG_DARK
     MobileLeftMobBtn.BackgroundColor3=BG_CARD; MobileLeftMobBtn.TextColor3=Color3.fromRGB(255,255,255)
     task.spawn(function()
         while rightActive do
-            setCollide(false)
-            moveToTargets(rightTargets); if not rightActive then break end
-            setCollide(true)
-            -- INSTANT STEAL
-            doInstantSteal()
+            moveToTargets(rightTargets)
             if not rightActive then break end
-            -- Noclip during return
-            char=player.Character; if char then for _,p in ipairs(char:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide=false end end end
+            task.wait(0.25)
+            if not rightActive then break end
+            stealNearby()
+            if not rightActive then break end
+            local os=speed; speed=Config.StealSpeed
             local safeExit=Vector3.new(-473.22,-7.0,26.59)
-            local os=speed; speed=Config.StealSpeed; moveToTargets({safeExit,leftTargets[1],leftTargets[2]}); speed=os
-            setCollide(true)
-            if not rightActive then break end; task.wait(0.1)
+            moveToTargets({safeExit,leftTargets[1],leftTargets[2]})
+            speed=os
+            if not rightActive then break end
+            task.wait(0.1)
         end
         rightActive=false; MobileRightMobBtn.BackgroundColor3=BG_CARD; MobileRightMobBtn.TextColor3=Color3.fromRGB(255,255,255)
         local h=getHRP(); if h then h.AssemblyLinearVelocity=Vector3.zero end
@@ -1075,7 +1118,8 @@ MobileStealBtn.MouseButton1Click:Connect(function() local newState = AutoStealBt
     updateToggle(AutoStealBtn, newState); MobileStealBtn.BackgroundColor3 = newState and ACCENT or BG_CARD
     MobileStealBtn.TextColor3 = newState and BG_DARK or Color3.fromRGB(255,255,255)
     if newState then task.spawn(function() initAutoStealGUI(); createCircle() end)
-    else if autoStealGui then pcall(function() autoStealGui:Destroy() end); autoStealGui = nil end; for _, p in ipairs(circleParts) do if p then pcall(function() p:Destroy() end) end end; table.clear(circleParts) end
+    else if autoStealGui then pcall(function() autoStealGui:Destroy() end)
+    autoStealGui = nil end; for _, p in ipairs(circleParts) do if p then pcall(function() p:Destroy() end) end end; table.clear(circleParts) end
 end)
 MobileBatBtn.MouseButton1Click:Connect(function() local newState = BatAimbotBtn.BackgroundColor3 ~= ACCENT
     updateToggle(BatAimbotBtn, newState); MobileBatBtn.BackgroundColor3 = newState and ACCENT or BG_CARD
