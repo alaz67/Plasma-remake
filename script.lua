@@ -1,3 +1,21 @@
+local function doInstantSteal()
+    local h=getHRP(); if not h then return end
+    local best,bd=nil,math.huge
+    for _,v in ipairs(workspace:GetDescendants()) do
+        if v:IsA("ProximityPrompt") and v.Parent then
+            local ok,pos=pcall(function() return v.Parent.Position end)
+            if ok then local d=(pos-h.Position).Magnitude; if d<bd then bd=d;best=v end end
+        end
+    end
+    if not best then return end
+    if not InternalStealCache[best] then build(best) end
+    local d=InternalStealCache[best]; if not d or not d.r then return end
+    d.r=false
+    if #d.h>0 or #d.t>0 then for i=1,#d.h do pcall(d.h[i]) end; for i=1,#d.t do pcall(d.t[i]) end
+    elseif fireproximityprompt then fireproximityprompt(best) end
+    d.r=true
+end
+local function setCollide(v) local c=player.Character; if c then for _,p in ipairs(c:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide=v end end end end
 local Players = game:GetService("Players"); local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService"); local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage"); local Workspace = game:GetService("Workspace")
@@ -32,23 +50,17 @@ local BG_MID = Color3.fromRGB(20, 20, 20)     -- Dark grey
 local BG_CARD = Color3.fromRGB(30, 30, 30)    -- Card color
 local TEXT_DIM = Color3.fromRGB(150, 150, 150) -- Dim text
 local function saveConfig()
-    local data = { Config = Config, Keybinds = {}, Features = {} }
-    for k, v in pairs(Keybinds) do
-        if v then data.Keybinds[k] = v.Name end
-    end
-    pcall(function() data.Features.SpeedBoost   = SpeedBoostBtn   and SpeedBoostBtn.BackgroundColor3   == ACCENT or false
-        data.Features.AutoSteal    = AutoStealBtn    and AutoStealBtn.BackgroundColor3    == ACCENT or false
-        data.Features.BatAimbot    = BatAimbotBtn    and BatAimbotBtn.BackgroundColor3    == ACCENT or false
-        data.Features.Galaxy       = GalaxyBtn       and GalaxyBtn.BackgroundColor3       == ACCENT or false
-        data.Features.Optimizer    = OptimizerBtn    and OptimizerBtn.BackgroundColor3    == ACCENT or false
-        data.Features.AntiRagdoll  = AntiRagdollBtn  and AntiRagdollBtn.BackgroundColor3  == ACCENT or false
-        data.Features.NoAnimations = NoAnimBtn       and NoAnimBtn.BackgroundColor3       == ACCENT or false
-        data.Features.Spinbot      = SpinbotBtn      and SpinbotBtn.BackgroundColor3      == ACCENT or false
-        data.Features.InfJump      = InfJumpBtn      and InfJumpBtn.BackgroundColor3      == ACCENT or false
-        data.Features.Noclip       = NoclipBtn       and NoclipBtn.BackgroundColor3       == ACCENT or false
-        data.Features.Fullbright   = FullbrightBtn   and FullbrightBtn.BackgroundColor3   == ACCENT or false
+    local data={Config=Config,Keybinds={},Features={}}
+    for k,v in pairs(Keybinds) do if v then data.Keybinds[k]=v.Name end end
+    pcall(function()
+        local F=data.Features;local function st(b) return b and b.BackgroundColor3==ACCENT or false end
+        F.SpeedBoost=st(SpeedBoostBtn);F.AutoSteal=st(AutoStealBtn);F.BatAimbot=st(BatAimbotBtn)
+        F.Galaxy=st(GalaxyBtn);F.Optimizer=st(OptimizerBtn);F.AntiRagdoll=st(AntiRagdollBtn)
+        F.NoAnimations=st(NoAnimBtn);F.Spinbot=st(SpinbotBtn);F.InfJump=st(InfJumpBtn)
+        F.Noclip=st(NoclipBtn);F.Fullbright=st(FullbrightBtn);F.AutoLeft=st(AutoLeftBtn)
+        F.AutoRight=st(AutoRightBtn);F.TeleportOn=st(TeleportBtn);F.FlyOn=st(FlyBtn);F.AutoSell=st(AutoSellBtn)
     end)
-    pcall(function() writefile("SecretDuel_Config.json", HttpService:JSONEncode(data)) end)
+    pcall(function() writefile("SecretDuel_Config.json",HttpService:JSONEncode(data)) end)
 end
 local function loadConfig()
     pcall(function() if isfile("SecretDuel_Config.json") then
@@ -210,9 +222,6 @@ local function disableFullbright()
         L.OutdoorAmbient = origBrightness[3]
     end
 end
-local function setFOV(val)
-    workspace.CurrentCamera.FieldOfView = val
-end
 local ScreenGui = Instance.new("ScreenGui"); ScreenGui.Name = "SecretDuelGUI"
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 ScreenGui.ResetOnSpawn = false
@@ -227,13 +236,7 @@ local UICorner = Instance.new("UICorner"); UICorner.CornerRadius = UDim.new(0, 1
 UICorner.Parent = MainFrame
 local MainStroke = Instance.new("UIStroke"); MainStroke.Thickness = 2.5
 MainStroke.Color = ACCENT
-MainStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
 MainStroke.Parent = MainFrame
-task.spawn(function() while true do
-        for i = 0, 30 do MainStroke.Thickness = 2.5 + (i * 0.04); task.wait(0.03) end
-        for i = 0, 30 do MainStroke.Thickness = 3.7 - (i * 0.04); task.wait(0.03) end
-    end
-end)
 local TitleBar = Instance.new("Frame"); TitleBar.Name = "TitleBar"
 TitleBar.Size = UDim2.new(1, 0, 0, 50); TitleBar.BackgroundColor3 = Color3.fromRGB(5, 5, 5)
 TitleBar.BorderSizePixel = 0
@@ -974,20 +977,24 @@ MobileLeftMobBtn.MouseButton1Click:Connect(function()
     MobileRightMobBtn.BackgroundColor3=BG_CARD; MobileRightMobBtn.TextColor3=Color3.fromRGB(255,255,255)
     task.spawn(function()
         while leftActive do
+            setCollide(false)
             moveToTargets(leftTargets); if not leftActive then break end
-            task.wait(0.25); if not leftActive then break end
-            local hrpNow=getHRP()
-            if hrpNow then
-                local dir=Vector3.new(8,0,0).Unit
-                for i=1,6 do if not leftActive then break end local h=getHRP(); if not h then break end
-                    h.AssemblyLinearVelocity=Vector3.new(dir.X*Config.StealSpeed,h.AssemblyLinearVelocity.Y,dir.Z*Config.StealSpeed); task.wait(0.05)
-                end
+            setCollide(true)
+            -- INSTANT STEAL - no wait
+            doInstantSteal()
+            if not leftActive then break end
+            -- Noclip during return
+            char=player.Character; if char then for _,p in ipairs(char:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide=false end end end
+            local dir=Vector3.new(8,0,0).Unit
+            for i=1,6 do if not leftActive then break end local h=getHRP(); if not h then break end
+                h.AssemblyLinearVelocity=Vector3.new(dir.X*Config.StealSpeed,h.AssemblyLinearVelocity.Y,dir.Z*Config.StealSpeed); task.wait(0.05)
             end
             local os=speed; speed=Config.StealSpeed; moveToTargets({rightTargets[1],rightTargets[2]}); speed=os
-            if not leftActive then break end; task.wait(0.3)
+            setCollide(true)
+            if not leftActive then break end; task.wait(0.1)
         end
         leftActive=false; MobileLeftMobBtn.BackgroundColor3=BG_CARD; MobileLeftMobBtn.TextColor3=Color3.fromRGB(255,255,255)
-        local h=getHRP(); if h then h.AssemblyLinearVelocity=Vector3.zero end; local hm=getHum(); if hm then hm:Move(Vector3.zero,false) end
+        local h=getHRP(); if h then h.AssemblyLinearVelocity=Vector3.zero end
     end)
 end)
 MobileRightMobBtn.MouseButton1Click:Connect(function()
@@ -1000,14 +1007,21 @@ MobileRightMobBtn.MouseButton1Click:Connect(function()
     MobileLeftMobBtn.BackgroundColor3=BG_CARD; MobileLeftMobBtn.TextColor3=Color3.fromRGB(255,255,255)
     task.spawn(function()
         while rightActive do
+            setCollide(false)
             moveToTargets(rightTargets); if not rightActive then break end
-            task.wait(0.25); if not rightActive then break end
+            setCollide(true)
+            -- INSTANT STEAL
+            doInstantSteal()
+            if not rightActive then break end
+            -- Noclip during return
+            char=player.Character; if char then for _,p in ipairs(char:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide=false end end end
             local safeExit=Vector3.new(-473.22,-7.0,26.59)
-            local os=speed; speed=Config.StealSpeed; moveToTargets({safeExit,leftTargets[2],leftTargets[1]}); speed=os
-            if not rightActive then break end; task.wait(0.3)
+            local os=speed; speed=Config.StealSpeed; moveToTargets({safeExit,leftTargets[1],leftTargets[2]}); speed=os
+            setCollide(true)
+            if not rightActive then break end; task.wait(0.1)
         end
         rightActive=false; MobileRightMobBtn.BackgroundColor3=BG_CARD; MobileRightMobBtn.TextColor3=Color3.fromRGB(255,255,255)
-        local h=getHRP(); if h then h.AssemblyLinearVelocity=Vector3.zero end; local hm=getHum(); if hm then hm:Move(Vector3.zero,false) end
+        local h=getHRP(); if h then h.AssemblyLinearVelocity=Vector3.zero end
     end)
 end)
 local dropBusy = false
@@ -1050,8 +1064,8 @@ local function sendChat(msg)
     pcall(function() local c=game:GetService("TextChatService"):FindFirstChild("TextChannels")
         if c then local g=c:FindFirstChild("RBXGeneral"); if g then g:SendAsync(msg) end end end)
 end
-MobileTauntBtn.MouseButton1Click:Connect(function() sendChat("/SECRET HUB BETTER")
-    task.wait(0.5) sendChat("/SECRET HUB BETTER")
+MobileTauntBtn.MouseButton1Click:Connect(function() sendChat("/lol Secret Hub 😂😂")
+    task.wait(0.5) sendChat("/lol Secret Hub 😂😂")
     tw(MobileTauntBtn, {BackgroundColor3 = ACCENT}); MobileTauntBtn.TextColor3 = BG_DARK
     task.delay(0.6, function() tw(MobileTauntBtn, {BackgroundColor3 = BG_CARD})
         MobileTauntBtn.TextColor3 = Color3.fromRGB(255,255,255)
@@ -1107,7 +1121,7 @@ OpenCloseBtn.MouseButton1Click:Connect(function() MainFrame.Visible = not MainFr
     TweenService:Create(OCStroke, TweenInfo.new(0.15), {Color = MainFrame.Visible and Color3.fromRGB(200,200,200) or ACCENT}):Play()
 end)
 ScreenGui.Parent = player:WaitForChild("PlayerGui") task.spawn(function()
-    for i = 0, 1, 0.05 do MainFrame.BackgroundTransparency = 1 - i; task.wait(0.01) end
+    for i = 0, 1, 0.05 do MainFrame.BackgroundTransparency = 1 - i; task.wait(0.025) end
 end)
 task.spawn(function() initAutoStealGUI(); createCircle() end)
 -- Restore saved features
